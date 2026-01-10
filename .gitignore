@@ -1,0 +1,9 @@
+# Log files
+*_log.txt
+setup_log.txt
+Setup_log.bat
+
+# Generated rotation scripts
+*.bat
+!Setup.bat
+!Setup_log.bat

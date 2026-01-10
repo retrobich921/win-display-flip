@@ -2,6 +2,9 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
+set LOGFILE=setup_log.txt
+echo [%DATE% %TIME%] === SETUP STARTED === > %LOGFILE%
+
 echo ========================================
 echo    DISPLAY ROTATION SETUP
 echo    Multi-Monitor Support
@@ -11,9 +14,12 @@ echo.
 :: Check admin rights
 net session >nul 2>&1
 if %errorLevel% NEQ 0 (
+    echo [%DATE% %TIME%] Requesting admin rights... >> %LOGFILE%
     powershell -Command "Start-Process '%~f0' -Verb RunAs"
     exit /b
 )
+
+echo [%DATE% %TIME%] Admin rights OK >> %LOGFILE%
 
 :: ========================================
 :: STEP 1: Scan real monitors
@@ -60,6 +66,7 @@ echo Select monitors to configure (comma separated)
 echo Example: 1, 2 or just 1
 echo.
 set /p MONITORS_INPUT="Monitors: "
+echo [%DATE% %TIME%] User input: %MONITORS_INPUT% >> %LOGFILE%
 
 :: Parse comma-separated input using PowerShell
 for /f "delims=" %%a in ('powershell -Command "('%MONITORS_INPUT%' -replace ' ','').Split(',') -join ' '"') do set MONITORS_LIST=%%a
@@ -98,6 +105,8 @@ set /p "ORI%IDX%=Target orientation (0-3): "
 
 echo Swap mode? (Y = toggle, N = set once)
 set /p "SWAP%IDX%=Swap mode (Y/N): "
+
+echo [%DATE% %TIME%] DISPLAY!CURRENT_MON! Orient=!ORI%IDX%! Swap=!SWAP%IDX%! >> %LOGFILE%
 echo.
 
 set /a IDX+=1
@@ -113,6 +122,7 @@ set /p FILENAME="Filename without .bat [rotate]: "
 if "%FILENAME%"=="" set FILENAME=rotate
 
 set OUTFILE=%FILENAME%.bat
+echo [%DATE% %TIME%] Output filename: %OUTFILE% >> %LOGFILE%
 
 :: ========================================
 :: STEP 5: Generate combined script
@@ -124,6 +134,9 @@ echo Generating %OUTFILE%...
 echo @echo off > "%OUTFILE%"
 echo setlocal >> "%OUTFILE%"
 echo cd /d "%%~dp0" >> "%OUTFILE%"
+echo set LOGFILE=%FILENAME%_log.txt >> "%OUTFILE%"
+echo. >> "%OUTFILE%"
+echo echo [%%DATE%% %%TIME%%] Starting Multi-Monitor Rotation... ^> %%LOGFILE%% >> "%OUTFILE%"
 echo. >> "%OUTFILE%"
 echo net session ^>nul 2^>^&1 >> "%OUTFILE%"
 echo if %%errorLevel%% NEQ 0 ( >> "%OUTFILE%"
@@ -148,6 +161,10 @@ set H_LOGIC=Math.Max
 if "!CURRENT_ORI!"=="0" set W_LOGIC=Math.Max& set H_LOGIC=Math.Min
 if "!CURRENT_ORI!"=="2" set W_LOGIC=Math.Max& set H_LOGIC=Math.Min
 
+echo [%DATE% %TIME%] Generating code for DISPLAY!CURRENT_MON! >> %LOGFILE%
+
+echo echo Processing DISPLAY!CURRENT_MON!... >> "%OUTFILE%"
+
 if /i "!CURRENT_SWAP!"=="Y" (
     call :GEN_SWAP !CURRENT_MON! !CURRENT_ORI! !W_LOGIC! !H_LOGIC! %IDX%
 ) else (
@@ -158,6 +175,8 @@ set /a IDX+=1
 goto GEN_LOOP
 
 :GEN_DONE
+
+echo echo Done. >> "%OUTFILE%"
 
 echo.
 echo ========================================
@@ -177,6 +196,7 @@ goto SUMMARY_LOOP
 
 :SUMMARY_DONE
 echo.
+echo [%DATE% %TIME%] === SETUP COMPLETE === >> %LOGFILE%
 pause
 exit /b
 
@@ -207,13 +227,15 @@ echo echo $c += 'public int dmPanningWidth;public int dmPanningHeight;}' ^>^> t%
 echo echo $c += 'public static void R(){' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo $c += 'DM m=new DM();m.dmSize=(short)Marshal.SizeOf(m);string n="\\\\.\\DISPLAY%M_NUM%";' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo $c += 'if(EnumDisplaySettings(n,-1,ref m)){int w=m.dmPelsWidth;int h=m.dmPelsHeight;' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
+echo echo $c += 'Console.WriteLine("DISPLAY%M_NUM%: current="+m.dmDisplayOrientation);' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo $c += 'if(m.dmDisplayOrientation==0){m.dmDisplayOrientation=%M_ORI%;m.dmPelsWidth=%M_WLOG%(w,h);m.dmPelsHeight=%M_HLOG%(w,h);}' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo $c += 'else{m.dmDisplayOrientation=0;m.dmPelsWidth=Math.Max(w,h);m.dmPelsHeight=Math.Min(w,h);}' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
-echo echo $c += 'm.dmFields=0x180080;ChangeDisplaySettingsEx(n,ref m,IntPtr.Zero,0,IntPtr.Zero);}}}' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
+echo echo $c += 'm.dmFields=0x180080;int r=ChangeDisplaySettingsEx(n,ref m,IntPtr.Zero,0,IntPtr.Zero);' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
+echo echo $c += 'Console.WriteLine("DISPLAY%M_NUM%: result="+r);}}}' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo Add-Type -TypeDefinition $c ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo [D%M_IDX%]::R() ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
-echo powershell -ExecutionPolicy Bypass -File t%M_IDX%.ps1 2^>nul >> "%OUTFILE%"
-echo del t%M_IDX%.ps1 2^>nul >> "%OUTFILE%"
+echo powershell -ExecutionPolicy Bypass -File t%M_IDX%.ps1 ^>^> %%LOGFILE%% 2^>^&1 >> "%OUTFILE%"
+echo del t%M_IDX%.ps1 >> "%OUTFILE%"
 echo. >> "%OUTFILE%"
 goto :eof
 
@@ -244,11 +266,13 @@ echo echo $c += 'public int dmPanningWidth;public int dmPanningHeight;}' ^>^> t%
 echo echo $c += 'public static void R(){' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo $c += 'DM m=new DM();m.dmSize=(short)Marshal.SizeOf(m);string n="\\\\.\\DISPLAY%M_NUM%";' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo $c += 'if(EnumDisplaySettings(n,-1,ref m)){int w=m.dmPelsWidth;int h=m.dmPelsHeight;' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
+echo echo $c += 'Console.WriteLine("DISPLAY%M_NUM%: setting to %M_ORI%...");' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo $c += 'm.dmDisplayOrientation=%M_ORI%;m.dmPelsWidth=%M_WLOG%(w,h);m.dmPelsHeight=%M_HLOG%(w,h);' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
-echo echo $c += 'm.dmFields=0x180080;ChangeDisplaySettingsEx(n,ref m,IntPtr.Zero,0,IntPtr.Zero);}}}' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
+echo echo $c += 'm.dmFields=0x180080;int r=ChangeDisplaySettingsEx(n,ref m,IntPtr.Zero,0,IntPtr.Zero);' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
+echo echo $c += 'Console.WriteLine("DISPLAY%M_NUM%: result="+r);}}}' ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo Add-Type -TypeDefinition $c ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
 echo echo [D%M_IDX%]::R() ^>^> t%M_IDX%.ps1 >> "%OUTFILE%"
-echo powershell -ExecutionPolicy Bypass -File t%M_IDX%.ps1 2^>nul >> "%OUTFILE%"
-echo del t%M_IDX%.ps1 2^>nul >> "%OUTFILE%"
+echo powershell -ExecutionPolicy Bypass -File t%M_IDX%.ps1 ^>^> %%LOGFILE%% 2^>^&1 >> "%OUTFILE%"
+echo del t%M_IDX%.ps1 >> "%OUTFILE%"
 echo. >> "%OUTFILE%"
 goto :eof
